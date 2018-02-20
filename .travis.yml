@@ -22,6 +22,7 @@ deploy:
   region: eu-west-1
   app: rtcstats-server
   env: rtcstats-server-prod
+  bucket_name: elasticbeanstalk-eu-west-1-020767569921
   on:
     repo: Confrer/rtcstats-server
     branch: develop
