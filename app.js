@@ -9,7 +9,12 @@ var child_process = require('child_process');
 var WebSocketServer = require('ws').Server;
 
 const maxmind = require('maxmind');
-const cityLookup = maxmind.open('./GeoLite2-City.mmdb');
+let cityLookup;
+try {
+    cityLookup = maxmind.open('./GeoLite2-City.mmdb');
+} catch (e) {
+    cityLookup = maxmind.open('./GeoLite2-City-fallback.mmdb');
+}
 
 var wss = null;
 
