@@ -29,8 +29,7 @@
     "platform": "https://github.com/bestiejs/platform.js.git",
     "sdp": "^1.0.0",
     "uuid": "^2.0.1",
-    "ws": "^1.1.1",
-    "rtcstats": "https://github.com/opentok/rtcstats.git"
+    "ws": "^5.1.1"
   },
   "devDependencies": {
     "eslint": "^1.10.3",

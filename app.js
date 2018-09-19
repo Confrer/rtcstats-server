@@ -1,12 +1,12 @@
 'use strict';
-var fs = require('fs');
-var config = require('config');
-var uuid = require('uuid');
-var obfuscate = require('./obfuscator');
-var os = require('os');
-var child_process = require('child_process');
+const fs = require('fs');
+const config = require('config');
+const uuid = require('uuid');
+const obfuscate = require('./obfuscator');
+const os = require('os');
+const child_process = require('child_process');
 
-var WebSocketServer = require('ws').Server;
+const WebSocketServer = require('ws').Server;
 
 const maxmind = require('maxmind');
 let cityLookup;
@@ -16,10 +16,15 @@ try {
     cityLookup = maxmind.open('./GeoLite2-City-fallback.mmdb');
 }
 
-var wss = null;
+const Database = require('./database')({
+    firehose: config.get('firehose'),
+});
+const Store = require('./store')({
+  s3: config.get('s3'),
+});
 
-var server;
-var tempPath = 'temp';
+let server;
+const tempPath = 'temp';
 
 class ProcessQueue {
     constructor() {
@@ -36,14 +41,29 @@ class ProcessQueue {
         }
     }
     process() {
-        var clientid = this.q.shift();
+        const clientid = this.q.shift();
         if (!clientid) return;
-        var p = child_process.fork('extract.js', [clientid]);
+        const p = child_process.fork('extract.js', [clientid]);
         p.on('exit', () => {
             this.numProc--;
             console.log('done', clientid, this.numProc);
             if (this.numProc < 0) this.numProc = 0;
             if (this.numProc < this.maxProc) process.nextTick(this.process.bind(this));
+            fs.readFile(tempPath + '/' + clientid, {encoding: 'utf-8'}, (err, data) => {
+                if (err) {
+                    console.error('Could not open file for store upload', err);
+                    return;
+                }
+                // remove the file
+                fs.unlink(tempPath + '/' + clientid, () => {
+                    // we're good...
+                });
+                Store.put(clientid, data);
+            });
+        });
+        p.on('message', (msg) => {
+            const {url, clientid, connid, clientFeatures, connectionFeatures} = msg;
+            Database.put(url, clientid, connid, clientFeatures, connectionFeatures);
         });
         p.on('error', () => {
             this.numProc--;
@@ -58,7 +78,7 @@ var q = new ProcessQueue();
 
 function setupWorkDirectory() {
     try {
-        fs.readdirSync(tempPath).forEach(function(fname) {
+        fs.readdirSync(tempPath).forEach(fname => {
             fs.unlinkSync(tempPath + '/' + fname);
         });
         fs.rmdirSync(tempPath);
@@ -81,7 +101,7 @@ function run(keys) {
     }
 
     server.listen(config.get('server').port);
-    server.on('request', function(request, response) {
+    server.on('request', (request, response) => {
         // look at request.url
         switch (request.url) {
         case "/":
@@ -98,33 +118,39 @@ function run(keys) {
         }
     });
 
-    wss = new WebSocketServer({ server: server });
-
-    wss.on('connection', function(client) {
+    const wss = new WebSocketServer({ server: server });
+    wss.on('connection', (client, upgradeReq) => {
+        let numberOfEvents = 0;
         // the url the client is coming from
-        var referer = client.upgradeReq.headers['origin'] + client.upgradeReq.url;
+        const referer = upgradeReq.headers['origin'] + upgradeReq.url;
         // TODO: check against known/valid urls
 
-        var ua = client.upgradeReq.headers['user-agent'];
-        var clientid = uuid.v4();
-        var tempStream = fs.createWriteStream(tempPath + '/' + clientid);
-        tempStream.on('finish', function() {
-            q.enqueue(clientid);
+        const ua = upgradeReq.headers['user-agent'];
+        const clientid = uuid.v4();
+        let tempStream = fs.createWriteStream(tempPath + '/' + clientid);
+        tempStream.on('finish', () => {
+            if (numberOfEvents > 0) {
+                q.enqueue(clientid);
+            } else {
+                fs.unlink(tempPath + '/' + clientid, () => {
+                    // we're good...
+                });
+            }
         });
 
-        var meta = {
-            path: client.upgradeReq.url,
-            origin: client.upgradeReq.headers['origin'],
+        const meta = {
+            path: upgradeReq.url,
+            origin: upgradeReq.headers['origin'],
             url: referer,
             userAgent: ua,
             time: Date.now()
         };
         tempStream.write(JSON.stringify(meta) + '\n');
 
-        var forwardedFor = client.upgradeReq.headers['x-forwarded-for'];
+        const forwardedFor = upgradeReq.headers['x-forwarded-for'];
         if (forwardedFor) {
-            process.nextTick(function() {
-                var city = cityLookup.get(forwardedFor);
+            process.nextTick(() => {
+                const city = cityLookup.get(forwardedFor);
                 if (tempStream) {
                     tempStream.write(JSON.stringify({
                         0: 'location',
@@ -137,9 +163,11 @@ function run(keys) {
             });
         }
 
-        console.log('connected', ua, referer);
-        client.on('message', function (msg) {
-            var data = JSON.parse(msg);
+        console.log('connected', ua, referer, clientid);
+
+        client.on('message', msg => {
+            const data = JSON.parse(msg);
+            numberOfEvents++;
             switch(data[0]) {
             case 'getUserMedia':
             case 'getUserMediaOnSuccess':
@@ -158,7 +186,7 @@ function run(keys) {
             }
         });
 
-        client.on('close', function() {
+        client.on('close', () => {
             tempStream.end();
             tempStream = null;
         });
