@@ -5,10 +5,6 @@ s3:
     region: eu-west-1
     bucket:
 
-dynamodb:
-    region: eu-west-1
-    table:
-
 firehose:
     region: eu-west-1
     stream:
