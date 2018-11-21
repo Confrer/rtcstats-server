@@ -398,6 +398,18 @@ module.exports = {
         return false;
     },
 
+    calledGetUserMediaRequestingAEC3: function(client) {
+        var gum = client.getUserMedia || [];
+        var requested = false;
+        for (var i = 0; i < gum.length; i++) {
+            if (gum[i].type === 'navigator.mediaDevices.getUserMedia' || gum[i].type === 'getUserMedia') {
+                var options = gum[i].value;
+                if (options.audio && options.audio.echoCancellationType === 'aec3') requested = true;
+            }
+        }
+        return requested;
+    },
+
     timeBetweenGetUserMediaAndGetUserMediaSuccess: function(client) {
         var gum = client.getUserMedia || [];
         var first;
@@ -522,7 +534,8 @@ module.exports = {
     // how long did the peerconnection live?
     // not necessarily connected which is different from session duration
     lifeTime: function(client, peerConnectionLog) {
-        return new Date(peerConnectionLog[peerConnectionLog.length - 1].time).getTime() - new Date(peerConnectionLog[0].time).getTime();
+        const lifeTime = new Date(peerConnectionLog[peerConnectionLog.length - 1].time).getTime() - new Date(peerConnectionLog[0].time).getTime();
+        return lifeTime > 0 ? lifeTime : null;
     },
 
     // the webrtc platform type -- webkit or moz
@@ -661,6 +674,11 @@ module.exports = {
     configuredCertificate: function(client, peerConnectionLog) {
         var peerConnectionConfig = getPeerConnectionConfig(peerConnectionLog);
         return peerConnectionConfig ? peerConnectionConfig.certificates !== undefined : false;
+    },
+
+    sdpSemantics: function(client, peerConnectionLog) {
+        var peerConnectionConfig = getPeerConnectionConfig(peerConnectionLog);
+        return peerConnectionConfig ? peerConnectionConfig.sdpSemantics : '';
     },
 
     // did ice gathering complete (aka: onicecandidate called with a null candidate)
@@ -1417,7 +1435,8 @@ module.exports = {
                         localIPAddress: localCandidate.ipAddress,
                         remoteIPAddress: remoteCandidate.ipAddress,
                         localTypePreference: localCandidate.priority >> 24,
-                        remoteTypePreference: remoteCandidate.priority >> 24
+                        remoteTypePreference: remoteCandidate.priority >> 24,
+                        localNetworkType: localCandidate.networkType
                     };
                 }
             });
